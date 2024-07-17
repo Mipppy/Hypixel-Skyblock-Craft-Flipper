@@ -12,7 +12,7 @@
 </head>
 <body>
     <div id="loading" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); color: white; font-size: 24px; text-align: center; padding-top: 45vh">
-        Loading page <b id="page">?</b>
+        Loading page <b id="page">???</b> for <b id="user"></b>
     </div>
 
     <script>
@@ -33,13 +33,14 @@
                     return data.id;
                 }
             }
-            throw new Error("Failed to fetch UUID");
+            alert("Something went wrong. Likely invalid username.")
         }
 
         async function fetchData(PLAYER_USER) {
             document.getElementById('loading').style.display = 'block'; // Show loading indicator
             const PLAYER_UUID = await fetchUUID(PLAYER_USER);
-            console.log(PLAYER_UUID);
+            localStorage.user = PLAYER_USER
+            document.getElementById("user").innerText = PLAYER_USER
             const baseUrl = `https://sky.coflnet.com/api/player/${PLAYER_UUID}/auctions?page=`;
             let allData = [];
             let page = 0;
@@ -53,6 +54,7 @@
                 const response = await fetch(baseUrl + page);
                 if (!response.ok) {
                     stopFetching = true;
+                    alert("Something went wrong when loading data.  Older data may not have loaded correctly")
                     return;
                 }
 
@@ -96,21 +98,20 @@
                 return null;
             }
         }
-
         async function handleData(data) {
             let tax = 0;
             const nonZeroBids = [];
             let tagSet = new Set();
             const craftingCostDict = {};
-
+        
             const updatedData = data.sort((a, b) => {
                 return a.highestBid - b.highestBid;
             });
-
+        
             updatedData.forEach((item) => {
                 if (item.highestBid !== 0) {
                     nonZeroBids.push(item);
-
+        
                     if (item.highestBid < 10_000_000) {
                         tax += (item.highestBid * 0.01);
                     } else if (item.highestBid < 100_000_000) {
@@ -123,7 +124,7 @@
                     }
                 }
             });
-
+        
             const tagArray = Array.from(tagSet);
             await Promise.all(tagArray.map(async (tag) => {
                 const cost = await fetchCraftingCost(tag);
@@ -131,16 +132,16 @@
                     craftingCostDict[tag] = cost;
                 }
             }));
-
+        
             nonZeroBids.forEach(item => {
                 const craftingCost = craftingCostDict[item.tag] || 0;
                 item.gainLoss = item.highestBid - craftingCost;
                 item.craftingCost = craftingCost;
                 item.percentageGain = item.highestBid / craftingCost;
             });
-
+        
             // Sort by gain/loss descending
-            nonZeroBids.sort((a, b) => b.gainLoss - a.gainLoss);
+            nonZeroBids.sort((a, b) => new Date(b.end) - new Date(a.end));
 
             document.getElementById("recentEarnings").innerText = parseInt(calculateRecentEarnings(nonZeroBids)).toLocaleString();
             document.getElementById("recentMVP").innerText = getHighestAverageReturnItem(nonZeroBids);
@@ -149,59 +150,70 @@
             document.getElementById("totalTax").innerText = parseInt(tax.toFixed(2)).toLocaleString();
             const tableBody = document.getElementById('dataTable').getElementsByTagName('tbody')[0];
             tableBody.innerHTML = ''; // Clear previous table rows
-
+        
             nonZeroBids.forEach(item => {
                 const row = tableBody.insertRow();
                 row.style.border = '1px solid #ddd';
                 row.style.backgroundColor = (tableBody.rows.length % 2 === 0) ? '#f9f9f9' : '#ffffff';
                 row.style.padding = '8px';
-
+        
                 const cellItemName = row.insertCell(0);
                 cellItemName.innerText = item.itemName;
                 cellItemName.style.border = '1px solid #ddd';
                 cellItemName.style.padding = '8px';
                 cellItemName.style.cursor = 'pointer'; // Add cursor pointer
-
+        
                 // Add click event to populate search input
-                cellItemName.addEventListener('click', function () {
-                    document.getElementById('search').value = item.itemName;
-                    updateTableFilter(item.itemName)
+                cellItemName.addEventListener('click', function (event) {
+                    event.stopPropagation(); // Prevent the click from triggering the entire row
+        
+                    const searchText = item.itemName.toLowerCase();
+                    document.getElementById('search').value = searchText;
+                    updateTableFilter(searchText);
                 });
-
+        
                 const cellHighestBid = row.insertCell(1);
                 cellHighestBid.innerText = parseInt(item.highestBid.toFixed(2)).toLocaleString();
                 cellHighestBid.style.border = '1px solid #ddd';
                 cellHighestBid.style.padding = '8px';
-
+        
                 const cellCraftingCost = row.insertCell(2);
                 cellCraftingCost.innerText = parseInt(item.craftingCost.toFixed(2)).toLocaleString();
                 cellCraftingCost.style.border = '1px solid #ddd';
                 cellCraftingCost.style.padding = '8px';
-
+        
                 const cellGainLoss = row.insertCell(3);
                 const gainLoss = parseInt(item.gainLoss.toFixed(2)).toLocaleString();
                 cellGainLoss.innerText = gainLoss;
-
+        
                 // Set color based on gain or loss
                 if (item.gainLoss > 0) {
                     cellGainLoss.style.color = 'green';
                 } else if (item.gainLoss < 0) {
                     cellGainLoss.style.color = 'red';
                 }
-
+        
                 const cellRow = row.insertCell(4)
                 cellRow.innerText = item.end;
-
+        
                 cellGainLoss.style.border = '1px solid #ddd';
                 cellGainLoss.style.padding = '8px';
             });
-
+        
             // Function to filter table rows based on search input
-            document.getElementById('search').addEventListener('change', function () {
+            document.getElementById('search').addEventListener('input', function () {
                 const searchText = this.value.toLowerCase();
-                updateTableFilter(searchText)
+                updateTableFilter(searchText);
             });
+            
+            document.getElementById("changeUser").addEventListener('click', function() {
+                fetchData(prompt("Enter your Minecraft Username", "")).then(data => handleData(data));
+            })
+
+            // Initialize table filter with empty string to display all rows
+            updateTableFilter('');
         }
+        
 
         function updateTableFilter(searchText) {
             const tableBody = document.getElementById('dataTable').getElementsByTagName('tbody')[0];
@@ -313,20 +325,22 @@
                 });
             });
         });
-
-        fetchData(prompt("Enter your Minecraft Username", "")).then(data => handleData(data));
+        if (localStorage.user) fetchData(localStorage.user).then(data => handleData(data))
+        else fetchData(prompt("Enter your Minecraft Username", "")).then(data => handleData(data));
     </script>
 
     <div style="width: 100%; display: flex; height: 200px;">
         <div style="flex: 1; border: 1px solid #ddd; padding: 8px;">
-            <b>Recent Earnings: <span id="recentEarnings" style="font-weight: normal;"></span></b> <br><br>
-            <b>Recent MVP: <span id="recentMVP" style="font-weight: normal;"></span></b> <br><br>
+            <b>Recent Earnings (2 Weeks): <span id="recentEarnings" style="font-weight: normal;"></span></b> <br><br>
+            <b>Recent MVP (2 Weeks): <span id="recentMVP" style="font-weight: normal;"></span></b> <br><br>
             <b>Total Auctions: <span id="totalAuctions" style="font-weight: normal;"></span></b> <br><br>
             <b>Failed Auctions: <span id="failedAuctions" style="font-weight: normal;"></span></b> <br><br>
             <b>Total Tax: <span id="totalTax" style="font-weight: normal;"></span></b>
         </div>
         <div style="flex: 1; border: 1px solid #ddd; padding: 8px;"></div>
-        <div style="flex: 1; border: 1px solid #ddd; padding: 8px;"></div>
+        <div style="flex: 1; border: 1px solid #ddd; padding: 8px;">
+            <button id="changeUser" style="padding: 10px; background-color: #007bff; color: white; border: none; cursor: pointer;">Change User</button>
+        </div>
     </div>
 
     <input id="search" type="text" style="width: 100%; box-sizing: border-box; padding: 10px; margin-bottom: 10px; margin-top: 20px;" placeholder="Search...">
