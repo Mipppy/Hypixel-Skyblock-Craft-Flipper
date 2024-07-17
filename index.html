@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fetch Data</title>
+    <style>
+        th {
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div id="loading" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); color: white; font-size: 24px; text-align: center; padding-top: 45vh">
+        Loading page <b id="page">?</b>
+    </div>
+
+    <script>
+        let pg = document.getElementById("page")
+        let sortDirection = {
+            itemName: true,
+            highestBid: true,
+            craftingCost: true,
+            gainLoss: true,
+            end: true
+        };
+
+        async function fetchUUID(username) {
+            const response = await fetch(`https://api.minetools.eu/uuid/${username}`);
+            if (response.ok) {
+                const data = await response.json();
+                if (data.id) {
+                    return data.id;
+                }
+            }
+            throw new Error("Failed to fetch UUID");
+        }
+
+        async function fetchData(PLAYER_USER) {
+            document.getElementById('loading').style.display = 'block'; // Show loading indicator
+            const PLAYER_UUID = await fetchUUID(PLAYER_USER);
+            console.log(PLAYER_UUID);
+            const baseUrl = `https://sky.coflnet.com/api/player/${PLAYER_UUID}/auctions?page=`;
+            let allData = [];
+            let page = 0;
+            let stopFetching = false;
+
+            const fetchPage = async () => {
+                page++;
+                pg.innerText = page
+                if (stopFetching) return;
+
+                const response = await fetch(baseUrl + page);
+                if (!response.ok) {
+                    stopFetching = true;
+                    return;
+                }
+
+                const data = await response.json();
+                if (data.length === 0) {
+                    stopFetching = true;
+                    return;
+                }
+
+                allData = allData.concat(data);
+            };
+
+            const interval = setInterval(async () => {
+                await fetchPage();
+
+                if (stopFetching) {
+                    clearInterval(interval);
+                    console.log(`Fetched data from ${page} pages`);
+                    document.getElementById('loading').style.display = 'none'; // Hide loading indicator
+                }
+            }, 10000 / 29);
+
+            while (!stopFetching) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            return allData;
+        }
+
+        async function fetchCraftingCost(tag) {
+            try {
+                const response = await fetch(`https://minionah.com/api/craftcost/${tag}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    return data[tag];
+                } else {
+                    console.error(`Failed to fetch crafting cost for ${tag}`);
+                    return null;
+                }
+            } catch (error) {
+                console.error(`Error fetching crafting cost for ${tag}:`, error);
+                return null;
+            }
+        }
+
+        async function handleData(data) {
+            let tax = 0;
+            const nonZeroBids = [];
+            let tagSet = new Set();
+            const craftingCostDict = {};
+
+            const updatedData = data.sort((a, b) => {
+                return a.highestBid - b.highestBid;
+            });
+
+            updatedData.forEach((item) => {
+                if (item.highestBid !== 0) {
+                    nonZeroBids.push(item);
+
+                    if (item.highestBid < 10_000_000) {
+                        tax += (item.highestBid * 0.01);
+                    } else if (item.highestBid < 100_000_000) {
+                        tax += (item.highestBid * 0.02);
+                    } else {
+                        tax += (item.highestBid * 0.025);
+                    }
+                    if (item.tag) {
+                        tagSet.add(item.tag);
+                    }
+                }
+            });
+
+            const tagArray = Array.from(tagSet);
+            await Promise.all(tagArray.map(async (tag) => {
+                const cost = await fetchCraftingCost(tag);
+                if (cost !== null) {
+                    craftingCostDict[tag] = cost;
+                }
+            }));
+
+            nonZeroBids.forEach(item => {
+                const craftingCost = craftingCostDict[item.tag] || 0;
+                item.gainLoss = item.highestBid - craftingCost;
+                item.craftingCost = craftingCost;
+                item.percentageGain = item.highestBid / craftingCost;
+            });
+
+            // Sort by gain/loss descending
+            nonZeroBids.sort((a, b) => b.gainLoss - a.gainLoss);
+
+            document.getElementById("recentEarnings").innerText = parseInt(calculateRecentEarnings(nonZeroBids)).toLocaleString();
+            document.getElementById("recentMVP").innerText = getHighestAverageReturnItem(nonZeroBids);
+            document.getElementById("totalAuctions").innerText = updatedData.length;
+            document.getElementById("failedAuctions").innerText = updatedData.length - nonZeroBids.length;
+            document.getElementById("totalTax").innerText = parseInt(tax.toFixed(2)).toLocaleString();
+            const tableBody = document.getElementById('dataTable').getElementsByTagName('tbody')[0];
+            tableBody.innerHTML = ''; // Clear previous table rows
+
+            nonZeroBids.forEach(item => {
+                const row = tableBody.insertRow();
+                row.style.border = '1px solid #ddd';
+                row.style.backgroundColor = (tableBody.rows.length % 2 === 0) ? '#f9f9f9' : '#ffffff';
+                row.style.padding = '8px';
+
+                const cellItemName = row.insertCell(0);
+                cellItemName.innerText = item.itemName;
+                cellItemName.style.border = '1px solid #ddd';
+                cellItemName.style.padding = '8px';
+                cellItemName.style.cursor = 'pointer'; // Add cursor pointer
+
+                // Add click event to populate search input
+                cellItemName.addEventListener('click', function () {
+                    document.getElementById('search').value = item.itemName;
+                    updateTableFilter(item.itemName)
+                });
+
+                const cellHighestBid = row.insertCell(1);
+                cellHighestBid.innerText = parseInt(item.highestBid.toFixed(2)).toLocaleString();
+                cellHighestBid.style.border = '1px solid #ddd';
+                cellHighestBid.style.padding = '8px';
+
+                const cellCraftingCost = row.insertCell(2);
+                cellCraftingCost.innerText = parseInt(item.craftingCost.toFixed(2)).toLocaleString();
+                cellCraftingCost.style.border = '1px solid #ddd';
+                cellCraftingCost.style.padding = '8px';
+
+                const cellGainLoss = row.insertCell(3);
+                const gainLoss = parseInt(item.gainLoss.toFixed(2)).toLocaleString();
+                cellGainLoss.innerText = gainLoss;
+
+                // Set color based on gain or loss
+                if (item.gainLoss > 0) {
+                    cellGainLoss.style.color = 'green';
+                } else if (item.gainLoss < 0) {
+                    cellGainLoss.style.color = 'red';
+                }
+
+                const cellRow = row.insertCell(4)
+                cellRow.innerText = item.end;
+
+                cellGainLoss.style.border = '1px solid #ddd';
+                cellGainLoss.style.padding = '8px';
+            });
+
+            // Function to filter table rows based on search input
+            document.getElementById('search').addEventListener('change', function () {
+                const searchText = this.value.toLowerCase();
+                updateTableFilter(searchText)
+            });
+        }
+
+        function updateTableFilter(searchText) {
+            const tableBody = document.getElementById('dataTable').getElementsByTagName('tbody')[0];
+            const rows = tableBody.getElementsByTagName('tr');
+        
+            Array.from(rows).forEach(row => {
+                const itemName = row.cells[0].innerText.toLowerCase();
+                const highestBid = row.cells[1].innerText.toLowerCase();
+                const craftingCost = row.cells[2].innerText.toLowerCase();
+                const gainLoss = row.cells[3].innerText.toLowerCase();
+        
+                if (itemName.includes(searchText) || highestBid.includes(searchText) || craftingCost.includes(searchText) || gainLoss.includes(searchText)) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        }
+        function calculateRecentEarnings(nonZeroBids) {
+            const twoWeeksAgo = new Date();
+            twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+            let recentEarnings = 0;
+
+            nonZeroBids.forEach(item => {
+                const endDate = new Date(item.end);
+                if (endDate >= twoWeeksAgo) {
+                    recentEarnings += item.gainLoss;
+                }
+            });
+
+            return recentEarnings.toFixed(2);
+        }
+
+        function getHighestAverageReturnItem(nonZeroBids) {
+            const twoWeeksAgo = new Date();
+            twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+            const itemReturns = {};
+
+            nonZeroBids.forEach(item => {
+                if (item.craftingCost == 0) return;
+                const endDate = new Date(item.end);
+                if (endDate >= twoWeeksAgo) {
+                    if (!itemReturns[item.itemName]) {
+                        itemReturns[item.itemName] = {
+                            totalReturn: 0,
+                            count: 0
+                        };
+                    }
+                    itemReturns[item.itemName].totalReturn += item.gainLoss;
+                    itemReturns[item.itemName].count += 1;
+                }
+            });
+
+            let highestAverageReturnItem = null;
+            let highestAverageReturn = -Infinity;
+
+            for (const [itemName, { totalReturn, count }] of Object.entries(itemReturns)) {
+                const averageReturn = totalReturn / count;
+                if (averageReturn > highestAverageReturn) {
+                    highestAverageReturn = averageReturn;
+                    highestAverageReturnItem = itemName;
+                }
+            }
+
+            return highestAverageReturnItem;
+        }
+
+        function sortTable(column) {
+            const tableBody = document.getElementById('dataTable').getElementsByTagName('tbody')[0];
+            let rows = Array.from(tableBody.rows);
+
+            let comparator;
+            if (column === 'itemName') {
+                comparator = (a, b) => {
+                    const result = a.cells[0].innerText.localeCompare(b.cells[0].innerText);
+                    if (result !== 0) return result;
+                    return parseInt(b.cells[3].innerText.replace(/,/g, '')) - parseInt(a.cells[3].innerText.replace(/,/g, ''));
+                };
+            } else if (column === 'highestBid') {
+                comparator = (a, b) => parseInt(a.cells[1].innerText.replace(/,/g, '')) - parseInt(b.cells[1].innerText.replace(/,/g, ''));
+            } else if (column === 'craftingCost') {
+                comparator = (a, b) => parseInt(a.cells[2].innerText.replace(/,/g, '')) - parseInt(b.cells[2].innerText.replace(/,/g, ''));
+            } else if (column === 'gainLoss') {
+                comparator = (a, b) => parseInt(a.cells[3].innerText.replace(/,/g, '')) - parseInt(b.cells[3].innerText.replace(/,/g, ''));
+            } else if (column === 'end') {
+                comparator = (a, b) => {
+                    const result = new Date(a.cells[4].innerText) - new Date(b.cells[4].innerText);
+                    if (result !== 0) return result;
+                    return parseInt(a.cells[1].innerText.replace(/,/g, '')) - parseInt(b.cells[1].innerText.replace(/,/g, ''));
+                };
+            }
+
+            rows.sort(comparator);
+
+            if (!sortDirection[column]) {
+                rows.reverse();
+            }
+
+            sortDirection[column] = !sortDirection[column];
+
+            rows.forEach(row => tableBody.appendChild(row));
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const headers = document.querySelectorAll('#dataTable th');
+            headers.forEach(header => {
+                header.addEventListener('click', () => {
+                    sortTable(header.dataset.column);
+                });
+            });
+        });
+
+        fetchData(prompt("Enter your Minecraft Username", "")).then(data => handleData(data));
+    </script>
+
+    <div style="width: 100%; display: flex; height: 200px;">
+        <div style="flex: 1; border: 1px solid #ddd; padding: 8px;">
+            <b>Recent Earnings: <span id="recentEarnings" style="font-weight: normal;"></span></b> <br><br>
+            <b>Recent MVP: <span id="recentMVP" style="font-weight: normal;"></span></b> <br><br>
+            <b>Total Auctions: <span id="totalAuctions" style="font-weight: normal;"></span></b> <br><br>
+            <b>Failed Auctions: <span id="failedAuctions" style="font-weight: normal;"></span></b> <br><br>
+            <b>Total Tax: <span id="totalTax" style="font-weight: normal;"></span></b>
+        </div>
+        <div style="flex: 1; border: 1px solid #ddd; padding: 8px;"></div>
+        <div style="flex: 1; border: 1px solid #ddd; padding: 8px;"></div>
+    </div>
+
+    <input id="search" type="text" style="width: 100%; box-sizing: border-box; padding: 10px; margin-bottom: 10px; margin-top: 20px;" placeholder="Search...">
+    <table id="dataTable" style="width: 100%; border-collapse: collapse; text-align: left; margin-top: 20px;">
+        <thead>
+            <tr style="background-color: #f2f2f2;">
+                <th style="border: 1px solid #ddd; padding: 8px;" data-column="itemName">Item</th>
+                <th style="border: 1px solid #ddd; padding: 8px;" data-column="highestBid">Highest Bid</th>
+                <th style="border: 1px solid #ddd; padding: 8px;" data-column="craftingCost">Crafting Cost</th>
+                <th style="border: 1px solid #ddd; padding: 8px;" data-column="gainLoss">Gain/Loss</th>
+                <th style="border: 1px solid #ddd; padding: 8px;" data-column="end">End Date</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+</body>
+</html>
