@@ -1,17 +1,20 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fetch Data</title>
+    <title>Excel Simulator</title>
     <style>
         th {
             cursor: pointer;
         }
     </style>
 </head>
+
 <body>
-    <div id="loading" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); color: white; font-size: 24px; text-align: center; padding-top: 45vh">
+    <div id="loading"
+        style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); color: white; font-size: 24px; text-align: center; padding-top: 45vh">
         Loading page <b id="page">???</b> for <b id="user"></b>
     </div>
 
@@ -24,7 +27,7 @@
             gainLoss: true,
             end: true
         };
-
+        let nonZeroBids;
         async function fetchUUID(username) {
             const response = await fetch(`https://api.minetools.eu/uuid/${username}`);
             if (response.ok) {
@@ -37,10 +40,11 @@
         }
 
         async function fetchData(PLAYER_USER) {
-            document.getElementById('loading').style.display = 'block'; // Show loading indicator
+            document.getElementById('loading').style.display = 'block';
             const PLAYER_UUID = await fetchUUID(PLAYER_USER);
             localStorage.user = PLAYER_USER
             document.getElementById("user").innerText = PLAYER_USER
+            document.getElementById("playerPage").innerText = `${PLAYER_USER}'s page`
             const baseUrl = `https://sky.coflnet.com/api/player/${PLAYER_UUID}/auctions?page=`;
             let allData = [];
             let page = 0;
@@ -73,7 +77,7 @@
                 if (stopFetching) {
                     clearInterval(interval);
                     console.log(`Fetched data from ${page} pages`);
-                    document.getElementById('loading').style.display = 'none'; // Hide loading indicator
+                    document.getElementById('loading').style.display = 'none';
                 }
             }, 10000 / 29);
 
@@ -100,18 +104,18 @@
         }
         async function handleData(data) {
             let tax = 0;
-            const nonZeroBids = [];
+            nonZeroBids = [];
             let tagSet = new Set();
             const craftingCostDict = {};
-        
+
             const updatedData = data.sort((a, b) => {
                 return a.highestBid - b.highestBid;
             });
-        
+
             updatedData.forEach((item) => {
                 if (item.highestBid !== 0) {
                     nonZeroBids.push(item);
-        
+
                     if (item.highestBid < 10_000_000) {
                         tax += (item.highestBid * 0.01);
                     } else if (item.highestBid < 100_000_000) {
@@ -124,7 +128,7 @@
                     }
                 }
             });
-        
+
             const tagArray = Array.from(tagSet);
             await Promise.all(tagArray.map(async (tag) => {
                 const cost = await fetchCraftingCost(tag);
@@ -132,15 +136,14 @@
                     craftingCostDict[tag] = cost;
                 }
             }));
-        
+
             nonZeroBids.forEach(item => {
                 const craftingCost = craftingCostDict[item.tag] || 0;
                 item.gainLoss = item.highestBid - craftingCost;
                 item.craftingCost = craftingCost;
                 item.percentageGain = item.highestBid / craftingCost;
             });
-        
-            // Sort by gain/loss descending
+
             nonZeroBids.sort((a, b) => new Date(b.end) - new Date(a.end));
 
             document.getElementById("recentEarnings").innerText = parseInt(calculateRecentEarnings(nonZeroBids)).toLocaleString();
@@ -149,88 +152,120 @@
             document.getElementById("failedAuctions").innerText = updatedData.length - nonZeroBids.length;
             document.getElementById("totalTax").innerText = parseInt(tax.toFixed(2)).toLocaleString();
             const tableBody = document.getElementById('dataTable').getElementsByTagName('tbody')[0];
-            tableBody.innerHTML = ''; // Clear previous table rows
-        
+            tableBody.innerHTML = '';
+
             nonZeroBids.forEach(item => {
                 const row = tableBody.insertRow();
                 row.style.border = '1px solid #ddd';
                 row.style.backgroundColor = (tableBody.rows.length % 2 === 0) ? '#f9f9f9' : '#ffffff';
                 row.style.padding = '8px';
-        
+
                 const cellItemName = row.insertCell(0);
                 cellItemName.innerText = item.itemName;
                 cellItemName.style.border = '1px solid #ddd';
                 cellItemName.style.padding = '8px';
-                cellItemName.style.cursor = 'pointer'; // Add cursor pointer
-        
-                // Add click event to populate search input
+                cellItemName.style.cursor = 'pointer';
+
                 cellItemName.addEventListener('click', function (event) {
-                    event.stopPropagation(); // Prevent the click from triggering the entire row
-        
+                    event.stopPropagation();
+
                     const searchText = item.itemName.toLowerCase();
                     document.getElementById('search').value = searchText;
                     updateTableFilter(searchText);
                 });
-        
+
                 const cellHighestBid = row.insertCell(1);
                 cellHighestBid.innerText = parseInt(item.highestBid.toFixed(2)).toLocaleString();
                 cellHighestBid.style.border = '1px solid #ddd';
                 cellHighestBid.style.padding = '8px';
-        
+
                 const cellCraftingCost = row.insertCell(2);
                 cellCraftingCost.innerText = parseInt(item.craftingCost.toFixed(2)).toLocaleString();
                 cellCraftingCost.style.border = '1px solid #ddd';
                 cellCraftingCost.style.padding = '8px';
-        
+
                 const cellGainLoss = row.insertCell(3);
                 const gainLoss = parseInt(item.gainLoss.toFixed(2)).toLocaleString();
                 cellGainLoss.innerText = gainLoss;
-        
-                // Set color based on gain or loss
+
                 if (item.gainLoss > 0) {
                     cellGainLoss.style.color = 'green';
                 } else if (item.gainLoss < 0) {
                     cellGainLoss.style.color = 'red';
                 }
-        
+
                 const cellRow = row.insertCell(4)
                 cellRow.innerText = item.end;
-        
+
+                const hiddenRow = row.insertCell(5)
+                hiddenRow.style.display = "none"
+                hiddenRow.innerText = item.tag
+
                 cellGainLoss.style.border = '1px solid #ddd';
                 cellGainLoss.style.padding = '8px';
             });
-        
-            // Function to filter table rows based on search input
+
             document.getElementById('search').addEventListener('input', function () {
                 const searchText = this.value.toLowerCase();
                 updateTableFilter(searchText);
             });
-            
-            document.getElementById("changeUser").addEventListener('click', function() {
+
+            document.getElementById("changeUser").addEventListener('click', function () {
                 fetchData(prompt("Enter your Minecraft Username", "")).then(data => handleData(data));
             })
 
-            // Initialize table filter with empty string to display all rows
             updateTableFilter('');
         }
-        
+
 
         function updateTableFilter(searchText) {
             const tableBody = document.getElementById('dataTable').getElementsByTagName('tbody')[0];
             const rows = tableBody.getElementsByTagName('tr');
-        
+
+            let displayedTag = null;
+            let allSameTag = true;
+
             Array.from(rows).forEach(row => {
                 const itemName = row.cells[0].innerText.toLowerCase();
                 const highestBid = row.cells[1].innerText.toLowerCase();
                 const craftingCost = row.cells[2].innerText.toLowerCase();
                 const gainLoss = row.cells[3].innerText.toLowerCase();
-        
+                const tag = row.cells[5].innerText.toLowerCase();
+
                 if (itemName.includes(searchText) || highestBid.includes(searchText) || craftingCost.includes(searchText) || gainLoss.includes(searchText)) {
                     row.style.display = '';
+                    if (displayedTag === null) {
+                        displayedTag = tag;
+                    } else if (displayedTag !== tag) {
+                        allSameTag = false;
+                    }
                 } else {
                     row.style.display = 'none';
                 }
             });
+
+            if (allSameTag && displayedTag !== null) {
+                var newList = nonZeroBids.filter(item => item.tag === displayedTag.toUpperCase());
+                console.log(newList)
+                document.getElementById("selectedItem").innerText = newList[0].itemName
+                const totalProfit = newList.reduce((acc, item) => acc + item.gainLoss, 0);
+                const averageProfit = totalProfit / newList.length;
+                document.getElementById("averageProfit").innerText = parseInt(averageProfit.toFixed(2)).toLocaleString()
+                document.getElementById("totalSoldAll").innerText = newList.length
+                const twoWeeksAgo = new Date();
+                twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+
+                const soldInLastTwoWeeks = newList.filter(item => {
+                    const endDate = new Date(item.end);
+                    return endDate >= twoWeeksAgo;
+                });
+
+                const totalProfitLastTwoWeeks = (soldInLastTwoWeeks.reduce((acc, item) => acc + item.gainLoss, 0)) / soldInLastTwoWeeks.length;
+
+                document.getElementById("totalSold").innerText = soldInLastTwoWeeks.length;
+
+                document.getElementById("averageRecentProfit").innerText = parseInt(totalProfitLastTwoWeeks.toFixed(2)).toLocaleString();
+            }
         }
         function calculateRecentEarnings(nonZeroBids) {
             const twoWeeksAgo = new Date();
@@ -337,13 +372,32 @@
             <b>Failed Auctions: <span id="failedAuctions" style="font-weight: normal;"></span></b> <br><br>
             <b>Total Tax: <span id="totalTax" style="font-weight: normal;"></span></b>
         </div>
-        <div style="flex: 1; border: 1px solid #ddd; padding: 8px;"></div>
         <div style="flex: 1; border: 1px solid #ddd; padding: 8px;">
-            <button id="changeUser" style="padding: 10px; background-color: #007bff; color: white; border: none; cursor: pointer;">Change User</button>
+            <b>Selected Item: <span id="selectedItem" style="font-weight: normal;">None!</span></b> <br><br>
+            <b>Average Profit (2 Weeks): <span id="averageRecentProfit" style="font-weight: normal;"></span></b>
+            <br><br>
+            <b>Average Profit (All Time): <span id="averageProfit" style="font-weight: normal;"></span></b> <br><br>
+            <b>Total Sold (2 Weeks): <span id="totalSold" style="font-weight: normal;"></span></b> <br><br>
+            <b>Total Sold (All Time): <span id="totalSoldAll" style="font-weight: normal;"></span></b> <br><br>
+
+        </div>
+        <div style="flex: 1; border: 1px solid #ddd; padding: 8px;">
+            <h3 id="playerPage" style="display:inline-block">Lone Adventurer's page</h3> <br> <br>
+            <button id="changeUser"
+                style="padding: 10px; background-color: #007bff; color: white; border: none; cursor: pointer;">Change
+                Player</button> <br> <br>
+            <a href="https://github.com/Mipppy/Hypixel-Skyblock-Craft-Flipper" target="_blank"
+                style="display: inline-block; background-color: #24292e; color: white; text-decoration: none; padding: 10px 20px; border-radius: 4px; font-size: 16px; font-family: Arial, sans-serif;">
+                <img src="https://upload.wikimedia.org/wikipedia/commons/9/91/Octicons-mark-github.svg"
+                    alt="GitHub Logo" style="width: 20px; height: 20px; vertical-align: middle; margin-right: 10px;">
+                Visit GitHub
+            </a>
         </div>
     </div>
 
-    <input id="search" type="text" style="width: 100%; box-sizing: border-box; padding: 10px; margin-bottom: 10px; margin-top: 20px;" placeholder="Search...">
+    <input id="search" type="text"
+        style="width: 100%; box-sizing: border-box; padding: 10px; margin-bottom: 10px; margin-top: 20px;"
+        placeholder="Search...">
     <table id="dataTable" style="width: 100%; border-collapse: collapse; text-align: left; margin-top: 20px;">
         <thead>
             <tr style="background-color: #f2f2f2;">
@@ -357,4 +411,5 @@
         <tbody></tbody>
     </table>
 </body>
+
 </html>
